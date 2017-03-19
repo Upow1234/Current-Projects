@@ -19,8 +19,6 @@ Parameter strokeAlpha = new Parameter("stroke alpha", 0, 255, 3.0, 0, 200);
 Parameter feedback = new Parameter("feedback", 0, 255, 1.0, 0, 255);
 Parameter slewRate = new Parameter("slewRate", 0, 1, 1000.0, 0, 1);
 
-//could add slew time to complete pair with feedback
-
 Parameter[][] pairs = {{triangleSize, triangleRadius}, {strokeWeight, speed}, {fillHue, fillSaturation}, {fillBrightness, fillAlpha}, 
   {strokeHue, strokeSaturation}, {strokeBrightness, strokeAlpha}, {feedback, slewRate}};
 
@@ -67,8 +65,6 @@ void setup() {
 }
 
 void draw() {
-
-  //println("frameRate = " + frameRate);
 
   noStroke();
   fill(0, feedback.value());

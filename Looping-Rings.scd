@@ -1,92 +1,69 @@
-/*
-
-need to add parameters for delay(put it last),
-
-
-*/
-//add filter lfo depth and lfo rate
-//cutoff inversion switch
-
-//will it be necessary to display levels on grid???
-
-
-//we're going back to lemur town...inversion switch on fm rate fine
-
-//eventually there will be an fm "page" and a filter "page" with an lfo
-
-//sub and and higher oscialltor possibilities
-//make efficient so to not fuck arc...efficient or something
-
-
 s.reboot;
 
 (
 
+//variables for sending levels to processing
 ~processing = NetAddr.new("10.42.0.238", 12000);
 ~urls = ["/test0", "/test1", "/test2", "/test3"];
 
+//declare arc and grid
 ~a = Arc.new("/monome", 0);
 ~g = MonoM.new("/monome", 0);
 
-~ringTask;
 
-~outputTask;
-
-
+//arc led rings
 ~rings = [Array.fill(64, 0), Array.fill(64, 0), Array.fill(64, 0), Array.fill(64, 0)] ;
 
+//positions of notes
 ~pos = [0, 0, 0, 0];
 
-
+//volume levels of notes
 ~volume = [0, 0, 0, 0];
 
+//note frequencies
 ~notes = [146.83, 164.81, 220, 246.94];
 
+//arc left encoders and right encoders selection index
 ~selectionLeft = 0;
 ~selectionRight = 1;
 
+//grid led array for left side of grid
 ~gridLeft = Array.fill(64, 0);
 
+//fm coarse tuning selection
 ~fmCoarse = 4;
 
+//fm coarse rates
 ~fmRates = [3, 2.5, 2, 1.5, 1, 0.75, 0.5, 0.25];
 
+//fm direction (increasing or decreasing)
 ~fmInversionState = 1;
 
 
-~delayBuffer = Buffer.alloc(s,88200,1);
-
-
-SynthDef.new("arcSynth", { arg freq = 400, amp = 0.2, detune = 1.001, modCoarse = 1, modFine = 0, fmDepth = 0, cutoff = 1, resonance = 1, modFineInversion = 1, effectSend;
+//synth def for tones
+SynthDef.new("arcSynth", { arg freq = 400, amp = 0.2, detune = 1.001, modCoarse = 1, modFine = 0, fmDepth = 0, cutoff = 1, resonance = 1, modFineInversion = 1;
 
 	var dry;
+
 	dry = (RLPF.ar(SinOsc.ar(([freq, (freq * detune)] + SinOsc.ar((freq * (modCoarse + (modFine * modFineInversion))), 0, (freq * fmDepth))), 0, amp), freq * cutoff, resonance, 0.1));
 
 	Out.ar(0, dry);
 
-	Out.ar(effectSend, dry);
+}).add;
 
-}, [250]).add;
-
+//synth for volume LFOs
 SynthDef("control", {arg busSine, busSaw, freq = 0.05, amp = 0;
 	Out.kr(busSine, SinOsc.kr(freq, 1.5pi, amp, amp));
 	Out.kr(busSaw, LFSaw.kr(freq, 0, 32, 32));
 }).add;
 
 
-//delay synth
-SynthDef.new("delay", {arg effectReceive, speed = 0.1, depth = 0.1, decayTime = 10, level = 1, delayTime = 1;
-	var lfo;
 
-	lfo = SinOsc.kr(speed, 1.5pi, (delayTime * depth), delayTime);
-
-	Out.ar(0, BufCombL.ar(~delayBuffer.bufnum, In.ar(effectReceive, 2), [lfo,lfo], decayTime, level))
-
-}, [100]).add;
 
 
 s.waitForBoot({
 
+	//assign monome devices to variables
 	~a.useDevice(0);
 	~g.useDevice(1);
 
@@ -118,7 +95,7 @@ s.waitForBoot({
 	}, "/monome/enc/delta");
 
 
-
+	//routine to update stored volume values when they differ from parameter values
 	~getValues = Routine({
 		var interval = 0.02;
 
@@ -159,7 +136,7 @@ s.waitForBoot({
 	SystemClock.sched(0, ~getValues);
 
 
-
+	//updates arc leds
 	~ringFunction = { arg enc, pos;
 
 		~rings[enc].fill(0);
@@ -243,6 +220,7 @@ s.waitForBoot({
 
 			});
 
+			//fm coarse pitch selection
 			if((message[1] == 4) && (message[3] ==1), {
 
 				~fmCoarse = message[2];
@@ -257,6 +235,7 @@ s.waitForBoot({
 				~gridLedUpdate.value();
 			});
 
+			//fm fine tuning direction
 			if(((message[1] == 5) && (message[2] == 2) && message[3] == 1), {
 
 				~fmInversionState = (~fmInversionState * -1);
@@ -286,6 +265,8 @@ s.waitForBoot({
 
 
 	}, "/monome/grid/key");
+
+	//function to update grid leds
 
 	~gridLedUpdate = {
 		~gridLeft.fill(0);
@@ -319,11 +300,16 @@ s.waitForBoot({
 
 	};
 
-	//private audio bus for delay
+	//initialize grid leds
 
-	~delayBus = Bus.audio(s, 2);
+	~g.ledall(0);
 
-	~delaySignal = Synth.new("delay", [\effectReceive, ~delayBus]);
+	~leftLed = 0;
+	~rightLed = 2;
+
+	~fmCoarseLed = ~fmCoarse;
+
+	~gridLedUpdate.value;
 
 	//creating synths
 
@@ -339,29 +325,13 @@ s.waitForBoot({
 		~synths[i].map(\amp, ~bussesSine[i]);
 	});
 
-	//initalize grid leds
-
-	~g.ledall(0);
-	~g.levset(0, 0, 15);
-	~g.levset(1, 0, 15);
-	~g.levset(2, 0, 5);
-	~g.levset(3, 0, 5);
-
-	for(0, 7, {arg i;
-		~g.levset(4, i, 3);
-	});
-
-	~g.levset(4, 4, 15);
-	~g.levset(5, 2, 15);
 
 	//parameters controled by the arc
 
 	~pairs = [
 		[Parameter.new("volume 0", 0, 0.2, 5000, 0, ~controls[0], \amp, 0 ) ,   Parameter.new("volume 1", 0, 0.2, 5000, 0, ~controls[1], \amp, 0 )], [Parameter.new("volume 2", 0, 0.2, 5000, 0, ~controls[2], \amp, 0 ) , Parameter.new("volume 3", 0, 0.2, 5000, 0, ~controls[3], \amp, 0)],
 		[Parameter.new("speed 0", 0, 50, 5000, 0.01, ~controls[0], \freq, 0) , Parameter.new("speed 1", 0, 50, 5000, 0.01, ~controls[1], \freq, 0)],
-		[Parameter.new("speed 2", 0, 50, 5000, 0.01, ~controls[2], \freq, 0) , Parameter.new("speed 3", 0, 50, 5000, 0.01, ~controls[3], \freq, 0)], [Parameter.new("FM-mod-fine", 0, 0.5, 1000, 0, ~synths, \modFine, 3), Parameter.new("FM Depth", 0, 50, 100, 0, ~synths, \fmDepth, 3)], [Parameter.new("Cutoff", 1, 10, 500, 1, ~synths, \cutoff, 3), Parameter.new("Resonance", 0, 1, 100, 1, ~synths, \resonance, 3)], [Parameter.new("Delay Time",  0.001, 1, 1000, 1, ~delaySignal, \delayTime, 0), Parameter.new("Delay Feedback", 0, 20, 100, 5, ~delaySignal, \decayTime, 0)], [Parameter.new("Delay LFO Speed", 0, 0.1, 100, 0.01, ~delaySignal, \speed, 0), Parameter.new("Delay LFO Depth", 0, 1, 1000, 0.01, ~delaySignal, \depth, 0)] ];
-
-		//speed and depth
+		[Parameter.new("speed 2", 0, 50, 5000, 0.01, ~controls[2], \freq, 0) , Parameter.new("speed 3", 0, 50, 5000, 0.01, ~controls[3], \freq, 0)], [Parameter.new("FM-mod-fine", 0, 0.5, 1000, 0, ~synths, \modFine, 3), Parameter.new("FM Depth", 0, 50, 100, 0, ~synths, \fmDepth, 3)], [Parameter.new("Cutoff", 1, 10, 100, 1, ~synths, \cutoff, 3), Parameter.new("Resonance", 0.05, 1.05, 100, 1, ~synths, \resonance, 3)] ];
 
 
 	//routine to send amplitude values to processing sketch
@@ -383,10 +353,6 @@ s.waitForBoot({
 	});
 
 	AppClock.sched(0, ~processingRoutine);
-
-
-
-
 
 }); //end of wait for boot
 

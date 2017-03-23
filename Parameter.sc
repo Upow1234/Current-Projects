@@ -46,8 +46,12 @@ Parameter {
 
 	sendChange {
 
+		if(iterations == -1, {
+			destination.value(value);
+		});
+
 		if(iterations == 0, {
-		destination.set(argument, value);
+			destination.set(argument, value);
 		});
 
 		if(iterations > 0, {

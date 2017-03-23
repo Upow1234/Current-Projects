@@ -1,3 +1,11 @@
+// exponential parameters where applicable
+// lines where applicable
+//fix start-up
+//problem was multiplication in delay buffer assignment...why doesn't delay work first time???
+
+//adjust ranges to perfection
+//make some actual music
+
 s.reboot;
 
 (
@@ -39,29 +47,62 @@ s.reboot;
 //fm direction (increasing or decreasing)
 ~fmInversionState = 1;
 
+//buffer for delay
+~delayBuffer = Buffer.alloc(s, (192000), 2);
+
 
 //synth def for tones
-SynthDef.new("arcSynth", { arg freq = 400, amp = 0.2, detune = 1.001, modCoarse = 1, modFine = 0, fmDepth = 0, cutoff = 1, resonance = 1, modFineInversion = 1;
+SynthDef.new("arcSynth", { arg freq = 400, amp = 0.2, detune = 1.001, modCoarse = 1, modFine = 0, fmDepth = 0, cutoff = 1, resonance = 1, modFineInversion = 1, distSend;
 
 	var dry;
 
 	dry = (RLPF.ar(SinOsc.ar(([freq, (freq * detune)] + SinOsc.ar((freq * (modCoarse + (modFine * modFineInversion))), 0, (freq * fmDepth))), 0, amp), freq * cutoff, resonance, 0.1));
 
-	Out.ar(0, dry);
+	Out.ar(distSend, dry);
+
+	Out.ar(2, Mix.new(dry));
 
 }).add;
 
 //synth for volume LFOs
 SynthDef("control", {arg busSine, busSaw, freq = 0.05, amp = 0;
+
 	Out.kr(busSine, SinOsc.kr(freq, 1.5pi, amp, amp));
 	Out.kr(busSaw, LFSaw.kr(freq, 0, 32, 32));
+
+}).add;
+
+//distortion mixing synth
+SynthDef.new("distortionMixer", {arg balance = 0, input, delaySend;
+	var dry, wet;
+
+	dry = (In.ar(input, 2) * ((balance * -1) + 1));
+
+	wet = [SoundIn.ar(0, balance), SoundIn.ar(0, balance)];
+
+	Out.ar(0, dry);
+
+	Out.ar(0, wet);
+
+	Out.ar(delaySend, HPF.ar((dry + wet), ~notes[0], 1));
+
+}).add;
+
+//delay synth
+SynthDef.new("delay", {arg effectReceive, speed = 0.1, depth = 0.1, decayTime = 10, level = 1, delayTime = 0.25;
+	var lfo;
+
+	lfo = SinOsc.kr(speed, 1.5pi, (delayTime * depth), delayTime);
+
+	Out.ar(0, (BufCombL.ar(~delayBuffer.bufnum, In.ar(effectReceive, 2), [lfo + lfo], decayTime, level)));
+
+	//Out.ar(0, In.ar(effectReceive, 2));
+
 }).add;
 
 
-
-
-
 s.waitForBoot({
+
 
 	//assign monome devices to variables
 	~a.useDevice(0);
@@ -311,14 +352,70 @@ s.waitForBoot({
 
 	~gridLedUpdate.value;
 
+	//the default delay time
+	~currentDelayTime = 0.25;
+
+	~storedDelayTime = ~currentDelayTime;
+	~busDelayTime.set(~currentDelayTime);
+
+	~changeDelayTime = {arg newTime;
+		~currentDelayTime = newTime;
+	};
+
+	//default depth
+	~currentDelayDepth = 0.1;
+
+	~storedDelayDepth = ~currentDelayDepth;
+	~busDelayDepth.set(~currentDelayDepth);
+
+	~changeDelayDepth = {arg newDepth;
+		~currentDelayDepth = newDepth;
+	};
+
+
+	~delayTask = Task({
+		var interval = 0.1;
+
+		loop {
+
+			{Out.kr(
+				~busDelayTime,
+				Line.kr(~storedDelayTime, ~currentDelayTime, (interval * 0.75), 1, 0, 2)
+			)}.play;
+
+			~storedDelayTime = ~currentDelayTime;
+
+			{Out.kr(
+				~busDelayDepth,
+				Line.kr(~storedDelayDepth, ~currentDelayDepth, (interval * 0.75), 1, 0, 2)
+			)}.play;
+
+			~storedDelayDepth = ~currentDelayDepth;
+
+			interval.yield;
+		}
+
+	}).play;
+
+	~sources = Group.new;
+	~effects = Group.after(~sources);
+
+
 	//creating synths
 
-	~synths = [Synth.before(~delaySignal, "arcSynth", [\freq, ~notes[0], \effectSend, ~delayBus]), Synth.before(~delaySignal, "arcSynth", [\freq, ~notes[1], \effectSend, ~delayBus]), Synth.before(~delaySignal, "arcSynth", [\freq, ~notes[2], \effectSend, ~delayBus]), Synth.before(~delaySignal, "arcSynth", [\freq, ~notes[3], \effectSend, ~delayBus])];
+	~toDist = Bus.audio(s, 2);
+	~toDelay = Bus.audio(s, 2);
+
+	~synths = [Synth.new("arcSynth", [\freq, ~notes[0], \distSend, ~toDist], ~sources), Synth.new("arcSynth", [\freq, ~notes[1], \distSend, ~toDist], ~sources), Synth.new("arcSynth", [\freq, ~notes[2], \distSend, ~toDist], ~sources), Synth.new("arcSynth", [\freq, ~notes[3], \distSend, ~toDist], ~sources)];
 
 	~bussesSine = [Bus.control(s, 1), Bus.control(s, 1), Bus.control(s, 1), Bus.control(s, 1)];
+
 	~bussesSaw = [Bus.control(s, 1), Bus.control(s, 1), Bus.control(s, 1), Bus.control(s, 1)];
 
-	~controls = [Synth.before(~synths[0], "control", [\busSine, ~bussesSine[0], \busSaw, ~bussesSaw[0]]), Synth.before(~synths[1], "control", [\busSine, ~bussesSine[1], \busSaw, ~bussesSaw[1]]), Synth.before(~synths[2], "control", [\busSine, ~bussesSine[2], \busSaw, ~bussesSaw[2]]), Synth.before(~synths[3], "control", [\busSine, ~bussesSine[3], \busSaw, ~bussesSaw[3]])];
+	~controls = [Synth.new("control", [\busSine, ~bussesSine[0], \busSaw, ~bussesSaw[0]], ~sources), Synth.new("control", [\busSine, ~bussesSine[1], \busSaw, ~bussesSaw[1]], ~sources), Synth.new("control", [\busSine, ~bussesSine[2], \busSaw, ~bussesSaw[2]], ~sources), Synth.new("control", [\busSine, ~bussesSine[3], \busSaw, ~bussesSaw[3]], ~sources)];
+
+
+	~distortionMixingSynth = Synth.new("distortionMixer", [\input, ~toDist, \delaySend, ~toDelay], ~effects);
 
 
 	for(0, 3, {arg i;
@@ -326,12 +423,30 @@ s.waitForBoot({
 	});
 
 
-	//parameters controled by the arc
+	//control busses for smoothing delay time and delay depth
+	~busDelayTime = Bus.control(s, 1);
+	~busDelayDepth = Bus.control(s, 1);
+
+	~delaySignal = Synth.tail(~effects, "delay", [\effectReceive, ~toDelay]);
+
+	//map ~busDelayTime to ~delaySignal
+	~delaySignal.map(\delayTime, ~busDelayTime);
+
+	//map ~busDelayDepth to ~delaySignal
+	~delaySignal.map(\depth, ~busDelayDepth);
+
+	// why the fuck on god's green fucking earth do i have to map these ...
+	// control rate busses need to be mapped?
+
+
+
+
+	//parameters controlled by the arc
 
 	~pairs = [
 		[Parameter.new("volume 0", 0, 0.2, 5000, 0, ~controls[0], \amp, 0 ) ,   Parameter.new("volume 1", 0, 0.2, 5000, 0, ~controls[1], \amp, 0 )], [Parameter.new("volume 2", 0, 0.2, 5000, 0, ~controls[2], \amp, 0 ) , Parameter.new("volume 3", 0, 0.2, 5000, 0, ~controls[3], \amp, 0)],
 		[Parameter.new("speed 0", 0, 50, 5000, 0.01, ~controls[0], \freq, 0) , Parameter.new("speed 1", 0, 50, 5000, 0.01, ~controls[1], \freq, 0)],
-		[Parameter.new("speed 2", 0, 50, 5000, 0.01, ~controls[2], \freq, 0) , Parameter.new("speed 3", 0, 50, 5000, 0.01, ~controls[3], \freq, 0)], [Parameter.new("FM-mod-fine", 0, 0.5, 1000, 0, ~synths, \modFine, 3), Parameter.new("FM Depth", 0, 50, 100, 0, ~synths, \fmDepth, 3)], [Parameter.new("Cutoff", 1, 10, 100, 1, ~synths, \cutoff, 3), Parameter.new("Resonance", 0.05, 1.05, 100, 1, ~synths, \resonance, 3)] ];
+		[Parameter.new("speed 2", 0, 50, 5000, 0.01, ~controls[2], \freq, 0) , Parameter.new("speed 3", 0, 50, 5000, 0.01, ~controls[3], \freq, 0)], [Parameter.new("FM-mod-fine", 0, 0.5, 1000, 0, ~synths, \modFine, 3), Parameter.new("FM Depth", 0, 50, 100, 0, ~synths, \fmDepth, 3)], [Parameter.new("Cutoff", 1, 10, 100, 1, ~synths, \cutoff, 3), Parameter.new("Resonance", 0.05, 1.05, 100, 1, ~synths, \resonance, 3)], [Parameter.new("Delay Time",  0.001, 2, 1000, ~currentDelayTime, ~changeDelayTime, nil, -1), Parameter.new("Delay Feedback", 0, 20, 100, 5, ~delaySignal, \decayTime, 0)], [Parameter.new("Delay LFO Speed", 0, 1, 1000, 0.1, ~delaySignal, \speed, 0), Parameter.new("Delay LFO Depth", 0, 0.25, 1000, ~currentDelayDepth, ~changeDelayDepth, nil, -1)], [Parameter.new("Distortion Balance", 0, 1, 1000, 0, ~distortionMixingSynth, \balance, 0), Parameter.new("Detune", 0.5, 2, 1000, 1, ~synths, \detune, 3)] ];
 
 
 	//routine to send amplitude values to processing sketch
@@ -359,4 +474,7 @@ s.waitForBoot({
 
 )
 
+s.queryAllNodes;
+~toDelay.index
 
+s.sampleRate
